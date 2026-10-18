@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Rumi: Demon Blade — 16-bit RPG</title>
+<style>
+*{box-sizing:border-box;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#100d25;color:#fff;font-family:monospace;touch-action:none}
+#wrap{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:8px}
+#game{display:block;width:min(100vw,177.78vh);height:auto;max-height:72vh;aspect-ratio:16/9;image-rendering:pixelated;border:4px solid #8d5cff;box-shadow:0 0 0 4px #241646,0 0 28px #7e39ff66;background:#171b46}
+#hud{width:min(100vw,177.78vh);display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:clamp(10px,2.2vw,14px);color:#f7eaff}
+.pill{background:#25183e;border:2px solid #8d5cff;padding:5px 8px}
+#controls{width:min(100vw,177.78vh);display:flex;justify-content:space-between;align-items:center;gap:12px}
+.pad{display:grid;grid-template-columns:repeat(3,42px);grid-template-rows:repeat(2,38px);gap:4px}
+button{font: bold 16px monospace;color:white;background:#432a78;border:2px solid #c4a1ff;border-radius:5px;touch-action:none;box-shadow:0 3px #21123d}
+button:active{transform:translateY(2px);box-shadow:0 1px #21123d;background:#7444bd}
+.pad button{width:42px;height:38px}.pad .up{grid-column:2}.pad .left{grid-column:1;grid-row:2}.pad .down{grid-column:2;grid-row:2}.pad .right{grid-column:3;grid-row:2}
+#attack{width:92px;height:76px;background:#a52c61;border-color:#ff9bc8;font-size:14px}
+#help{font-size:11px;color:#cbbbe9;text-align:center}
+@media(min-width:700px){#controls{max-width:520px}.pad{grid-template-columns:repeat(3,50px);grid-template-rows:repeat(2,44px)}.pad button{width:50px;height:44px}#attack{width:112px;height:84px}}
+</style>
+</head>
+<body>
+<div id="wrap">
+<div id="hud">
+ <span class="pill">❤️ <b id="hp">5</b></span>
+ <span class="pill">⚔ УРОВЕНЬ <b id="level">1</b></span>
+ <span class="pill">💎 ДУШИ <b id="souls">0</b></span>
+ <span class="pill">👹 ДЕМОНОВ <b id="kills">0</b></span>
+</div>
+<canvas id="game" width="320" height="180" aria-label="Rumi Demon Blade game"></canvas>
+<div id="controls">
+ <div class="pad">
+  <button class="up" data-key="up">▲</button><button class="left" data-key="left">◀</button><button class="down" data-key="down">▼</button><button class="right" data-key="right">▶</button>
+ </div>
+ <button id="attack">⚔<br>УДАР</button>
+</div>
+<div id="help">Двигайся кнопками или WASD/стрелками. Удар — кнопка или пробел.</div>
+</div>
+<script>
+(function(){
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+ctx.imageSmoothingEnabled=false;
+const W=320,H=180;
+const keys={up:false,down:false,left:false,right:false};
+let hp=5,souls=0,kills=0,level=1,frame=0,attackTimer=0,invuln=0,spawnTimer=0,toastTimer=0,toast='РУМИ: КЛИНОК ДЕМОНОВ';
+const player={x:158,y:100,face:1,speed:1.45};
+let enemies=[];
+const rand=(a,b)=>a+Math.random()*(b-a);
+function rect(x,y,w,h,c){ctx.fillStyle=c;ctx.fillRect(Math.round(x),Math.round(y),w,h)}
+function text(s,x,y,c='#fff',size=8){ctx.fillStyle=c;ctx.font='bold '+size+'px monospace';ctx.fillText(s,x,y)}
+function scene(){
+ // pixel-art night forest
+ rect(0,0,W,H,'#171b46');
+ for(let y=0;y<70;y+=10){rect(0,y,W,1,'#22275a')}
+ rect(0,92,W,88,'#263653');
+ for(let i=0;i<80;i++){let x=(i*47)%W,y=94+(i*29)%82;rect(x,y,2,2,i%3?'#365342':'#526445')}
+ // distant purple mountains and moon
+ for(let i=0;i<6;i++){let x=i*62-15;rect(x,53,28,23,'#29245b');rect(x+6,46,17,7,'#29245b');rect(x+11,41,8,5,'#29245b')}
+ rect(260,17,15,15,'#f9dca0');rect(265,13,10,4,'#171b46');rect(271,17,5,8,'#171b46');
+ // trees
+ for(let i=0;i<7;i++){let x=i*53-10;rect(x,64,9,48,'#59365c');rect(x-9,57,27,17,'#342d68');rect(x-5,48,20,13,'#423778');rect(x+2,42,8,8,'#51458b')}
+ // path
+ rect(0,132,W,48,'#3c3d55');for(let i=0;i<24;i++)rect((i*31+frame*.15)%W,145+(i*13)%30,3,2,'#6a5970');
+}
+function drawPlayer(){
+ const x=Math.round(player.x),y=Math.round(player.y);
+ // shadow
+ rect(x-7,y+13,15,3,'#15152c');
+ // legs and boots
+ rect(x-5,y+6,4,7,'#35264f');rect(x+2,y+6,4,7,'#35264f');rect(x-6,y+11,5,3,'#17152c');rect(x+2,y+11,5,3,'#17152c');
+ // purple coat
+ rect(x-7,y-3,14,11,'#a84bce');rect(x-5,y-1,10,8,'#5637a0');rect(x-2,y-2,3,9,'#f1d9ff');
+ // arms
+ rect(x-10,y,3,7,'#eab4c3');rect(x+7,y,3,7,'#eab4c3');
+ // head and hair
+ rect(x-5,y-12,10,10,'#f0b7a4');rect(x-7,y-15,14,6,'#24203f');rect(x-7,y-10,3,9,'#24203f');rect(x+4,y-11,3,8,'#24203f');
+ // hair shine, eye
+ rect(x-4,y-14,4,2,'#bca5ff');rect(x+2*player.face,y-8,2,2,'#35204b');
+ // demon blade
+ if(attackTimer>0){
+  const sx=x+player.face*8, sy=y-1;
+  rect(sx,sy-2,player.face*16||1,4,'#e6d8ff');
+  rect(sx+player.face*9,sy-4,player.face*8||1,2,'#9df8ff');
+  rect(sx-player.face*2,sy-4,4,8,'#ffd3ec');
+  rect(x-17,y-18,34,2,'#a7f8ff');
+ }else{
+  rect(x+player.face*7,y-1,player.face*9||1,2,'#d9e5ff');rect(x+player.face*14,y-3,player.face*3||1,6,'#9df8ff');
+ }
+}
+function drawEnemy(e){
+ let x=Math.round(e.x),y=Math.round(e.y);
+ rect(x-7,y+12,15,3,'#15152c');
+ rect(x-6,y-3,12,13,'#633f88');rect(x-5,y-10,10,9,'#a8a0bf');
+ rect(x-7,y-12,5,4,'#dfd1ff');rect(x+3,y-12,5,4,'#dfd1ff');
+ rect(x-4,y-7,3,2,'#ff477d');rect(x+2,y-7,3,2,'#ff477d');
+ rect(x-9,y+1,3,7,'#5a2c78');rect(x+6,y+1,3,7,'#5a2c78');
+ if(e.hp===2)rect(x-4,y-15,8,2,'#ffb0df');
+}
+function spawn(){
+ const side=Math.random()<.5?0:1;
+ enemies.push({x:side?316:4,y:rand(91,158),hp:level>2&&Math.random()<.3?2:1,speed:rand(.22,.48)+level*.035});
+}
+function update(){
+ frame++;
+ if(keys.left){player.x-=player.speed;player.face=-1}
+ if(keys.right){player.x+=player.speed;player.face=1}
+ if(keys.up)player.y-=player.speed;
+ if(keys.down)player.y+=player.speed;
+ player.x=Math.max(12,Math.min(308,player.x));player.y=Math.max(82,Math.min(163,player.y));
+ if(attackTimer>0)attackTimer--;
+ if(invuln>0)invuln--;
+ if(toastTimer>0)toastTimer--;
+ spawnTimer--;
+ if(spawnTimer<=0&&enemies.length<7){spawn();spawnTimer=Math.max(38,100-level*5)}
+ for(const e of enemies){
+  const dx=player.x-e.x,dy=player.y-e.y,d=Math.hypot(dx,dy)||1;
+  e.x+=dx/d*e.speed;e.y+=dy/d*e.speed;
+  if(d<13&&invuln===0){hp--;invuln=65;toast='ДЕМОН РАНИЛ РУМИ!';toastTimer=45;if(hp<=0){hp=5;souls=Math.max(0,souls-5);player.x=160;player.y=105;enemies=[];toast='РУМИ ВОЗВРАЩАЕТСЯ В БОЙ';toastTimer=90}}
+ }
+ enemies=enemies.filter(e=>e.hp>0);
+ document.getElementById('hp').textContent=hp;
+ document.getElementById('souls').textContent=souls;
+ document.getElementById('kills').textContent=kills;
+ document.getElementById('level').textContent=level;
+}
+function attack(){
+ if(attackTimer>0)return;
+ attackTimer=13;
+ for(const e of enemies){
+  const dx=e.x-player.x,dy=e.y-player.y;
+  if(Math.hypot(dx,dy)<30&&dx*player.face>-8){
+   e.hp--; if(e.hp<=0){kills++;souls+=2;if(kills%5===0){level++;toast='УРОВЕНЬ ПОВЫШЕН!';toastTimer=70}}
+   else{toast='ДЕМОН РАНЕН!';toastTimer=20}
+  }
+ }
+}
+function draw(){
+ scene();
+ // glow specks
+ for(let i=0;i<13;i++){let x=(i*71+frame*.25)%W,y=82+(i*23)%78;rect(x,y,1,1,i%2?'#c7a8ff':'#9df8ff')}
+ enemies.forEach(drawEnemy);
+ if(invuln===0||Math.floor(frame/5)%2===0)drawPlayer();
+ if(toastTimer>0){rect(42,8,236,15,'#17112bdc');text(toast,50,18,'#ffe4ff',8)}
+ else if(frame<130){rect(44,8,232,15,'#17112bdc');text('РУМИ: КЛИНОК ДЕМОНОВ',53,18,'#ffe4ff',9)}
+ text('FOREST OF SHADOWS',5,174,'#d2c3ff',6);
+}
+function loop(){update();draw();requestAnimationFrame(loop)}
+function setKey(k,v){if(k in keys)keys[k]=v}
+document.querySelectorAll('[data-key]').forEach(b=>{
+ const k=b.dataset.key;
+ b.addEventListener('pointerdown',e=>{e.preventDefault();setKey(k,true);b.setPointerCapture(e.pointerId)});
+ for(const ev of ['pointerup','pointercancel','pointerleave'])b.addEventListener(ev,e=>{setKey(k,false)});
+});
+const attackButton=document.getElementById('attack');
+attackButton.addEventListener('pointerdown',e=>{e.preventDefault();attack()});
+addEventListener('keydown',e=>{
+ if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key))e.preventDefault();
+ if(e.key==='ArrowUp'||e.key.toLowerCase()==='w')keys.up=true;
+ if(e.key==='ArrowDown'||e.key.toLowerCase()==='s')keys.down=true;
+ if(e.key==='ArrowLeft'||e.key.toLowerCase()==='a')keys.left=true;
+ if(e.key==='ArrowRight'||e.key.toLowerCase()==='d')keys.right=true;
+ if(e.key===' '||e.key.toLowerCase()==='j')attack();
+});
+addEventListener('keyup',e=>{
+ if(e.key==='ArrowUp'||e.key.toLowerCase()==='w')keys.up=false;
+ if(e.key==='ArrowDown'||e.key.toLowerCase()==='s')keys.down=false;
+ if(e.key==='ArrowLeft'||e.key.toLowerCase()==='a')keys.left=false;
+ if(e.key==='ArrowRight'||e.key.toLowerCase()==='d')keys.right=false;
+});
+document.addEventListener('contextmenu',e=>e.preventDefault());
+loop();
+})();
+</script>
+</body>
+</html>
